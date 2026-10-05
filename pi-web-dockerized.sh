@@ -171,6 +171,12 @@ run_web() {
     project_dir="$(cd "$project_dir" && pwd)"
 
     parse_config
+    # Publish the port instead of using the host network (unless configured otherwise):
+    # --network host does not reach the host on Docker Desktop or a VM-based Docker.
+    # Read by build_common_docker_args (dynamic scope, like PI_SYNC_PACKAGES).
+    local PI_PUBLISH_WEB_PORT=false
+    [ "$WEB_NETWORK" = host ] || PI_PUBLISH_WEB_PORT=true
+
     print_info "Starting pi-web in Docker..."
     print_info "Mounted directory: $project_dir"
     print_info "Add it as a project in the UI using the path: $(compute_container_path "$project_dir")"

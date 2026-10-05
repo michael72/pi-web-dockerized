@@ -112,6 +112,7 @@ PLANTUML_SUPPORT=true            # Boolean flag for the in-container PlantUML se
 HOST_PI_CONFIG=false             # Boolean flag: mount the host's ~/.pi/agent instead of the private agent dir
 WEB_HOST=127.0.0.1               # Address pi-web binds to inside the container (host network)
 WEB_PORT=8504                    # Port pi-web listens on
+WEB_NETWORK=publish              # How web is reached: "publish" (-p, bridge network) or "host" (--network host)
 
 # ============================================
 # SHARED HELPERS
@@ -281,12 +282,12 @@ collect_pi_package_sources() {
 build_common_docker_args() {
     local project_setup="${1:-false}"
     local packages=""
+    local web_bind="$WEB_HOST"
     [ "${PI_SYNC_PACKAGES:-true}" = true ] && packages=$(collect_pi_package_sources)
 
     # shellcheck disable=SC2034  # DOCKER_COMMON_ARGS is used by callers that source this file
     DOCKER_COMMON_ARGS=(
         --rm
-        --network host
         -e "HOST_UID=$(id -u)"
         -e "HOST_GID=$(id -g)"
         -e "TERM=${TERM:-xterm-256color}"
@@ -294,9 +295,23 @@ build_common_docker_args() {
         -e "PLANTUML_SUPPORT=$PLANTUML_SUPPORT"
         -e "PI_PROJECT_SETUP=$project_setup"
         -e "PI_PACKAGES=$packages"
-        -e "PI_WEB_HOST=$WEB_HOST"
         -e "PI_WEB_PORT=$WEB_PORT"
     )
+
+    if [ "${PI_PUBLISH_WEB_PORT:-false}" = true ]; then
+        # Bridge network: the host reaches pi-web through the published port, so pi-web
+        # must listen on all container interfaces; WEB_HOST is the *host-side* bind
+        # address. host.docker.internal lets the container reach services on the host
+        # (e.g. a local llama-server); Docker Desktop defines it, Linux needs the mapping.
+        [[ "$web_bind" == *:* ]] && web_bind="[$web_bind]"
+        DOCKER_COMMON_ARGS+=(
+            -p "$web_bind:$WEB_PORT:$WEB_PORT"
+            --add-host host.docker.internal:host-gateway
+            -e "PI_WEB_HOST=0.0.0.0"
+        )
+    else
+        DOCKER_COMMON_ARGS+=(--network host -e "PI_WEB_HOST=$WEB_HOST")
+    fi
 
     # Pass terminal identification variables so applications inside the container
     # can detect the host terminal and use its capabilities correctly.
@@ -420,10 +435,14 @@ init_config_file() {
 # can then read your host credentials and modify your host extensions.
 # setting.host_pi_config=false
 
-# pi-web (browser UI, './pi-web-dockerized.sh web'). The container uses the host
-# network, so 127.0.0.1 means: reachable from this machine only.
+# pi-web (browser UI, './pi-web-dockerized.sh web'). setting.web_host is the address
+# on this machine the port is published on: 127.0.0.1 means this machine only.
 # setting.web_host=127.0.0.1
 # setting.web_port=8504
+# publish (default): the port is published with -p, which also works on Docker Desktop
+#   and Docker in a VM; host services (e.g. a local model server) are reachable as
+#   host.docker.internal. host: --network host, Linux only; host services are localhost.
+# setting.web_network=publish
 
 # Pi packages (extensions, skills, agents, prompts) installed on first launch
 # Format: package.<name>=<npm:name[@version] | git:host/path[@ref]>
@@ -473,6 +492,7 @@ load_config() {
     HOST_PI_CONFIG=false
     WEB_HOST=127.0.0.1
     WEB_PORT=8504
+    WEB_NETWORK=publish
 
     local key value name
     while IFS='=' read -r key value; do
@@ -512,6 +532,9 @@ load_config() {
             setting.web_port)
                 [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -ge 1 ] && [ "$value" -le 65535 ] && WEB_PORT="$value"
                 ;;
+            setting.web_network)
+                [ "$value" = host ] && WEB_NETWORK=host
+                ;;
         esac
     done < "$CONFIG_FILE"
 
@@ -545,6 +568,8 @@ save_config() {
         echo "# pi-web (browser UI, './pi-web-dockerized.sh web')"
         echo "setting.web_host=$WEB_HOST"
         echo "setting.web_port=$WEB_PORT"
+        echo "# publish: -p port mapping (works on Docker Desktop); host: --network host (Linux only)"
+        echo "setting.web_network=$WEB_NETWORK"
         echo ""
         echo "# Pi packages (extensions, skills, agents, prompts) installed on first launch"
         echo "# Format: package.<name>=<npm:name[@version] | git:host/path[@ref]>"
@@ -972,9 +997,9 @@ prompt_web_settings() {
     echo ""
     config_info "pi-web Browser UI (https://github.com/jmfederico/pi-web)"
     echo "'./pi-web-dockerized.sh web' serves a browser UI for Pi sessions."
-    echo "The container uses the host network, so 127.0.0.1 is reachable from this"
-    echo "machine only. pi-web has no authentication: bind another address only on a"
-    echo "network you trust (or put an authenticated reverse proxy in front of it)."
+    echo "The port is published on the bind address below; 127.0.0.1 is reachable from"
+    echo "this machine only. pi-web has no authentication: bind another address only on"
+    echo "a network you trust (or put an authenticated reverse proxy in front of it)."
     echo ""
 
     local answer
@@ -1049,7 +1074,7 @@ print_config() {
     echo "  Graphify support: $GRAPHIFY_SUPPORT"
     echo "  PlantUML server: $PLANTUML_SUPPORT"
     echo "  Pi agent directory: $(agent_dir)$([ "$HOST_PI_CONFIG" = true ] && echo ' (host)')"
-    echo "  pi-web: http://$WEB_HOST:$WEB_PORT"
+    echo "  pi-web: http://$WEB_HOST:$WEB_PORT ($WEB_NETWORK network)"
 
     echo ""
     local sources

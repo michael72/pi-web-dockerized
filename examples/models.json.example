@@ -1,0 +1,17 @@
+{
+  "providers": {
+    "qwen-local": {
+      "baseUrl": "http://host.docker.internal:8280/v1",
+      "api": "openai-completions",
+      "apiKey": "local",
+      "models": [
+        {
+          "id": "qwen3-coder-30b-a3b",
+          "name": "Qwen3-Coder-30B-A3B-Instruct-1M (Q4_K_M)",
+          "contextWindow": 65536,
+          "maxTokens": 16384
+        }
+      ]
+    }
+  }
+}

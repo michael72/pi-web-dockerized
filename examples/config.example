@@ -39,6 +39,10 @@
 # pi-web browser UI ('pi-web-dockerized.sh web'); no authentication, keep it on loopback
 # setting.web_host=127.0.0.1
 # setting.web_port=8504
+# publish (default): publish the port with -p; works on Docker Desktop / Docker in a VM.
+#   Host services (e.g. a local model server) are reachable as host.docker.internal.
+# host: --network host (Linux only); host services are reachable as localhost.
+# setting.web_network=publish
 
 # ============================================
 # Pi packages: skills, agents, extensions, prompts

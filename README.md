@@ -78,7 +78,8 @@ Communities stay unnamed ("Community N") because the startup build uses no LLM; 
 | `setting.graphify_support` | `true` | See above |
 | `setting.plantuml_support` | `true` | Start the `pumlsrv` PlantUML server for `pumlcli` |
 | `setting.ssh_agent_support` | `false` | Forward the host's `SSH_AUTH_SOCK` (git over SSH without sharing keys) |
-| `setting.web_host` / `setting.web_port` | `127.0.0.1` / `8504` | Where `web` listens |
+| `setting.web_host` / `setting.web_port` | `127.0.0.1` / `8504` | Host address and port `web` is published on |
+| `setting.web_network` | `publish` | `publish`: `-p` port mapping, works everywhere incl. Docker Desktop. `host`: `--network host` (Linux only) |
 | `setting.host_pi_config` | `false` | Use the host's `~/.pi/agent` — see [Security](#security) |
 
 Not carried over from opencode-dockerized: the LLM-interceptor (`lli`) integration and Oh My OpenCode specifics (Bun was dropped from the image with it).
@@ -87,7 +88,20 @@ Not carried over from opencode-dockerized: the LLM-interceptor (`lli`) integrati
 
 `web` starts pi-web's session daemon and server in the container. Pi sessions keep running when the browser disconnects, as long as the container runs (Ctrl-C stops it). The wrapper prints the path to add as a project in the UI: the project is mounted at its host path with `$HOME` stripped (`/home/me/code/app` → `/code/app`).
 
-pi-web has **no authentication** and assumes trusted users. The default bind address `127.0.0.1` combined with `--network host` makes it reachable from your machine only. To use it from another device, change `setting.web_host` only on a network you trust, or tunnel with SSH / an authenticated reverse proxy. Its state (projects, settings) persists in `~/.local/share/pi-web-dockerized/pi-web/`.
+`web` publishes the port with `-p 127.0.0.1:8504:8504` (pi-web listens on all interfaces *inside* the container; `setting.web_host` is the address on your machine), so it works with Docker Desktop and VM-based Docker as well as native Linux.
+
+pi-web has **no authentication** and assumes trusted users. The default bind address `127.0.0.1` makes it reachable from your machine only. To use it from another device, change `setting.web_host` only on a network you trust, or tunnel with SSH / an authenticated reverse proxy. Its state (projects, settings) persists in `~/.local/share/pi-web-dockerized/pi-web/`.
+
+## Local and custom models
+
+Pi reads custom providers from `models.json` in its agent directory (`~/.local/share/pi-web-dockerized/agent/models.json`, or `~/.pi/agent/models.json` with `setting.host_pi_config=true`). It is reloaded when you open `/model`. An OpenAI-compatible server such as llama.cpp's `llama-server`:
+
+```bash
+cp examples/models.json.example ~/.local/share/pi-web-dockerized/agent/models.json
+./pi-web-dockerized.sh models qwen        # should list qwen-local / qwen3-coder-30b-a3b
+```
+
+[`examples/models.json.example`](examples/models.json.example) is the opencode `qwen-local` provider translated to Pi's format: `baseURL` → `baseUrl`, `limit.context` / `limit.output` → `contextWindow` / `maxTokens`, `npm: @ai-sdk/openai-compatible` → `"api": "openai-completions"`. `apiKey` needs some value for Pi to offer the model; a server without authentication ignores it. Because of `host.docker.internal` (see Troubleshooting), the URL is `http://host.docker.internal:8280/v1`, not `localhost`. Select the model with `/model` in Pi.
 
 ## Configuration
 
@@ -107,7 +121,7 @@ Pi runs commands **without asking for approval**, and its extensions run with th
 - **Project directory: read-write.** That is the blast radius for file changes. Git worktrees get the main `.git` directory read-only, so `git commit` must be done on the host.
 - **Private agent directory.** Pi's [containerization guide](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/containerization.md) advises against mounting `~/.pi/agent`. The container therefore uses `~/.local/share/pi-web-dockerized/agent` (credentials from `/login`, settings, sessions, installed packages), created with mode 700. `setting.host_pi_config=true` mounts your host `~/.pi/agent` read-write instead — convenient, but then anything running in the container can read your host credentials and rewrite your host extensions.
 - **Docker socket is mounted** for Docker-in-Docker work. That gives the container control over the host's Docker daemon, i.e. effectively root on the host. If you do not need it, pass `false` as the `docker_socket` argument in the `run_container` calls of `pi-web-dockerized.sh`.
-- **Network is the host's** (`--network host`) — no egress restriction.
+- **Network is unrestricted.** `run`, `exec` and `shell` share the host's network (`--network host`); `web` uses a bridge network with one published port. Neither restricts egress.
 - **Project trust.** Pi asks before loading `.pi/` or `.agents/skills` resources from a project; the decision is saved in the agent directory (`trust.json`). Treat an unfamiliar repository's `AGENTS.md` as untrusted input regardless.
 - Non-root user mapped to your host UID/GID; `--rm` removes containers on exit; `~/.gitconfig`, `~/.npmrc`, `~/.agents` and `~/.gradle/gradle.properties` are mounted read-only.
 - Environment variables reach the container only when listed as `env.*`, and only by name.
@@ -134,7 +148,8 @@ Pi runs commands **without asking for approval**, and its extensions run with th
 - **Port already in use.** A host-side pi-web service already owns 8504; change `setting.web_port` (`setup.sh` or the config).
 - **First launch is slow.** Package installs (and the graphify build for big projects) happen then; later launches skip the installs. Set `setting.graphify_support=false` to skip graph builds.
 - **Files owned by root in the project.** Should not happen — the container maps your UID/GID. If it does, check that `HOST_UID`/`HOST_GID` reach the container (`DRY_RUN=true`).
-- `--network host` behaves differently on Docker Desktop for macOS/Windows; `web` may then need a port mapping instead.
+- **Browser cannot reach `localhost:8504`.** `web` publishes the port by default, which works on Docker Desktop. Only with `setting.web_network=host` (`--network host`) does it depend on the Docker host being your machine — on Docker Desktop for macOS/Windows it is not.
+- **Local model server unreachable.** In `web` mode the container is not on the host network, so `localhost` is the container itself. Use `host.docker.internal` in the model's base URL, and make the server listen on more than loopback (`llama-server --host 0.0.0.0`) when Docker runs natively on Linux. `run`, `exec` and `shell` still use the host network, where `localhost` works on Linux.
 
 ## License
 

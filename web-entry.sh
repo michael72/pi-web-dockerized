@@ -31,7 +31,7 @@ if ! kill -0 "$sessiond_pid" 2>/dev/null; then
     exit 1
 fi
 
-echo "pi-web: listening on http://${PI_WEB_HOST}:${PI_WEB_PORT}"
+echo "pi-web: listening on ${PI_WEB_HOST}:${PI_WEB_PORT} (inside the container)"
 pi-web-server &
 server_pid=$!
 wait "$server_pid"
