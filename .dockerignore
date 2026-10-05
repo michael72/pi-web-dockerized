@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+
+# Documentation (not needed in image)
+*.md
+LICENSE
+
+# Environment and config examples (not needed in image)
+.env
+examples/
+
+# Host-side scripts, not used inside the container
+# Only entrypoint.sh and web-entry.sh are COPYed into the image
+pi-web-dockerized.sh
+completions/
+setup.sh
+config-lib.sh
+
+# Docker
+.dockerignore
